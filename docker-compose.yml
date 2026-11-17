@@ -1,0 +1,94 @@
+# One node = one Go service container + one Rust agent container that share
+# a network namespace (`network_mode: service:<svc>`), like a Kubernetes pod.
+# The service reaches its agent on 127.0.0.1:9000; other agents reach it at
+# <svc>:9000. A network fault injected on a node therefore hits both the
+# service and its agent.
+#
+# Call graph: frontend -> orders -> payments
+#
+# Switch every agent between Rewind and the baselines with REWIND_MODE:
+#   REWIND_MODE=retro (default) | all | sample:0.01
+
+# Images are built once (by `collector` and `frontend`) and reused by the
+# other services, so parallel builds don't race on the same tag.
+x-agent: &agent
+  image: rewind-tracer
+  pull_policy: never
+  environment: &agent-env
+    REWIND_COLLECTOR_URL: http://collector:9100
+    REWIND_BUFFER_BYTES: ${REWIND_BUFFER_BYTES:-16777216}
+    REWIND_LATENCY_THRESHOLD_US: ${REWIND_LATENCY_THRESHOLD_US:-500000}
+    REWIND_MODE: ${REWIND_MODE:-retro}
+  cpus: 0.5
+  mem_limit: 128m
+
+x-service: &service
+  image: rewind-service
+  pull_policy: never
+  cap_add: [NET_ADMIN] # for tc/netem fault injection
+  cpus: 0.5
+  mem_limit: 128m
+
+services:
+  collector:
+    build: ./tracer
+    image: rewind-tracer
+    entrypoint: ["rewind-collector"]
+    ports: ["9100:9100"]
+
+  # ---------------- node: frontend ----------------
+  frontend:
+    <<: *service
+    build: ./services
+    environment:
+      NODE_NAME: frontend
+      AGENT_ADDR: frontend:9000
+      DOWNSTREAM: http://orders:8080/order
+    ports: ["8080:8080", "9001:9000"] # service, agent stats
+  frontend-agent:
+    <<: *agent
+    network_mode: service:frontend
+    environment:
+      <<: *agent-env
+      REWIND_NODE: frontend
+      REWIND_SELF_ADDR: frontend:9000
+
+  # ---------------- node: orders ----------------
+  orders:
+    <<: *service
+    environment:
+      NODE_NAME: orders
+      AGENT_ADDR: orders:9000
+      DOWNSTREAM: http://payments:8080/pay
+    ports: ["9002:9000"]
+  orders-agent:
+    <<: *agent
+    network_mode: service:orders
+    environment:
+      <<: *agent-env
+      REWIND_NODE: orders
+      REWIND_SELF_ADDR: orders:9000
+
+  # ---------------- node: payments ----------------
+  payments:
+    <<: *service
+    environment:
+      NODE_NAME: payments
+      AGENT_ADDR: payments:9000
+      FAIL_RATE: ${PAYMENTS_FAIL_RATE:-0.01}
+    ports: ["9003:9000"]
+  payments-agent:
+    <<: *agent
+    network_mode: service:payments
+    environment:
+      <<: *agent-env
+      REWIND_NODE: payments
+      REWIND_SELF_ADDR: payments:9000
+
+  # Run with: docker compose run --rm loadgen -rps 50 -duration 30s
+  loadgen:
+    image: rewind-service
+    pull_policy: never
+    entrypoint: ["loadgen", "-url", "http://frontend:8080/checkout", "-out", "/results/ground_truth.csv"]
+    volumes: ["./results:/results"]
+    profiles: ["tools"]
