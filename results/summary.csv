@@ -1,0 +1,4 @@
+mode,requests,failed_requests,failed_traces_collected_complete,traces_at_collector,bytes_to_collector,reports_to_collector,rps,duration,run_at_utc
+retro,1000,17,17,17,14595,51,50,20s,2026-11-18T13:12:56Z
+all,1000,11,11,1000,748053,1202,50,20s,2026-11-18T13:13:23Z
+sample:0.01,1000,9,0,10,8500,30,50,20s,2026-11-18T13:13:51Z

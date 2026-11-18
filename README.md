@@ -85,17 +85,24 @@ test with 3 agents and a collector on localhost).
 - Docker Compose deployment, one pod-like node per service, with per-node CPU and memory limits
 - Baseline modes `all` and `sample:p` in the same agent
 
-**First measurement** (no faults, 1000 requests at 50 rps, payments fails 1% of the time):
+**Preliminary measurement** (no faults, 1000 requests at 50 requests/s,
+payments fails 1% of requests, one run per configuration):
 
-| Mode | Failed requests | Failed requests collected complete | Traces at collector | Bytes to collector |
+| Mode | Failed requests | Failed traces collected complete | Traces at collector | Bytes to collector |
 |---|---:|---:|---:|---:|
-| Rewind (`retro`) | 11 | **11** | 11 | **9.4 KB** |
-| Send everything (`all`) | 9 | 9 | 1000 | 748 KB |
-| Head sampling 1% | 18 | **0** | 6 | 5.1 KB |
+| Rewind (`retro`) | 17 | 17 | 17 | 14.6 KB |
+| Full export (`all`) | 11 | 11 | 1000 | 748 KB |
+| Head sampling 1% | 9 | 0 | 10 | 8.5 KB |
 
-Rewind catches every failure, as sending everything does, at about 1/80 of
-the traffic. Sampling costs about as little as Rewind but misses every
-failure. *This is the happy path; the open question is what happens under faults.*
+Rewind retained every failed trace at about 2% of the data volume of full
+export; head sampling had a comparable volume but retained none. Failure counts
+differ between runs, and these are fault-free conditions, so the results are
+indicative only.
+
+Reproduce with `python experiments/compare_modes.py` (Docker running). It
+writes `results/summary.csv` plus the ground truth of each run
+(`results/ground_truth_<mode>.csv`). The numbers above are from the run of
+18.11.2026, committed in `results/`.
 
 **Next (final week)**
 - Chaos: `tc netem` delay and loss per node, `docker kill` of a node, CPU overload
