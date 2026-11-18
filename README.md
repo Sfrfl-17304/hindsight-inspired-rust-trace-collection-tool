@@ -74,7 +74,7 @@ Baselines run on the same code path:
 Tests: `cd tracer && cargo test` (ring buffer unit tests, plus an end-to-end
 test with 3 agents and a collector on localhost).
 
-## Status (Checkpoint 2)
+## Status 
 
 **Done**
 - Node model defined ([docs/node-model.md](docs/node-model.md))
