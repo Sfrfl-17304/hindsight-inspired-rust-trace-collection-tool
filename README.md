@@ -1,4 +1,4 @@
-# Rewind: cooperative, retroactive trace collection
+# Cooperative, retroactive trace collection
 
 > *What if every node kept its own traces, and nodes only talked to each
 > other when something went wrong?*
