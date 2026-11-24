@@ -1,4 +1,6 @@
 /tracer/target/
+/results/ground_truth.csv
+__pycache__/
 *.swp
 .DS_Store
 .vscode/

@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rewind collector</title>
+<style>
+  :root {
+    --bg: #fafafa; --panel: #fff; --text: #222; --muted: #6b6b6b; --line: #e3e3e3;
+    --accent: #ff6b1f; --ok: #3a7d44; --err: #c62828; --bar: #8c8c8c; --sel: #fff3ea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151515; --panel: #1e1e1e; --text: #e8e8e8; --muted: #9a9a9a; --line: #333;
+            --bar: #777; --sel: #33261d; --err: #ef5350; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+         background: var(--bg); color: var(--text); }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 24px; padding: 14px 20px;
+           border-bottom: 3px solid var(--accent); background: var(--panel); }
+  h1 { font-size: 18px; margin: 0; }
+  h1 span { color: var(--accent); }
+  .stat b { font-size: 18px; display: block; }
+  .stat { color: var(--muted); font-size: 12px; }
+  .stat b { color: var(--text); }
+  .spacer { flex: 1; }
+  button { font: inherit; padding: 6px 12px; border: 1px solid var(--line); background: var(--panel);
+           color: var(--text); border-radius: 4px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  main { display: grid; grid-template-columns: minmax(320px, 1fr) 2fr; gap: 16px; padding: 16px 20px; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  section h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+               margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { padding: 7px 14px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover, tbody tr.sel { background: var(--sel); }
+  .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+  .err { color: var(--err); font-weight: 600; }
+  .ok { color: var(--ok); }
+  .list { max-height: calc(100vh - 150px); overflow-y: auto; }
+  .empty { padding: 24px 14px; color: var(--muted); }
+  .detail { padding: 14px; }
+  .meta { color: var(--muted); margin-bottom: 14px; }
+  .meta div { margin: 2px 0; }
+  .row { display: grid; grid-template-columns: 220px 1fr 80px; align-items: center; gap: 10px;
+         padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .track { position: relative; height: 18px; background: var(--bg); border-radius: 3px; }
+  .bar { position: absolute; top: 0; height: 100%; background: var(--bar); border-radius: 3px; min-width: 2px; }
+  .bar.e { background: var(--err); }
+  .label small { color: var(--muted); display: block; }
+  .dur { text-align: right; }
+  .peers { color: var(--muted); font-size: 12px; margin-top: 12px; }
+  .nodes { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; padding: 16px 20px 0; }
+  .node { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; }
+  .node.down { border-color: var(--err); }
+  .node.click { cursor: pointer; }
+  .node.click:hover, .node.sel { border-color: var(--accent); }
+  .detail table td, .detail table th { padding: 5px 10px; }
+  .node h3 { margin: 0 0 6px; font-size: 15px; display: flex; justify-content: space-between; }
+  .node h3 small { font-weight: 400; color: var(--muted); font-size: 12px; }
+  .node dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 0; font-size: 13px; }
+  .node dt { color: var(--muted); }
+  .node dd { margin: 0; text-align: right; font-family: ui-monospace, Consolas, monospace; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>Rewind</span> collector</h1>
+  <div class="stat"><b id="s-traces">0</b>traces received</div>
+  <div class="stat"><b id="s-reports">0</b>reports</div>
+  <div class="stat"><b id="s-bytes">0 B</b>received from agents</div>
+  <div class="spacer"></div>
+  <label class="stat"><input type="checkbox" id="auto" checked> auto-refresh</label>
+  <button id="clear">Clear</button>
+</header>
+<div class="nodes" id="nodes"></div>
+<main>
+  <section>
+    <h2>Collected traces</h2>
+    <div class="list">
+      <table>
+        <thead><tr><th>Time</th><th>Origin</th><th>Spans</th><th>Duration</th></tr></thead>
+        <tbody id="traces"></tbody>
+      </table>
+      <div class="empty" id="empty">No traces yet. Healthy requests are never sent here; send some load and wait for a failure.</div>
+    </div>
+  </section>
+  <section>
+    <h2 id="panel-title">Trace</h2>
+    <div class="detail" id="detail"><div class="empty">Select a trace.</div></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let selected = null;
+
+function el(tag, props = {}, ...children) {
+  const e = document.createElement(tag);
+  Object.assign(e, props);
+  for (const c of children) e.append(c);
+  return e;
+}
+const fmtTime = (us) => new Date(us / 1000).toLocaleTimeString([], { hour12: false }) +
+  "." + String(Math.floor(us / 1000) % 1000).padStart(3, "0");
+const fmtDur = (us) => us >= 1000 ? (us / 1000).toFixed(1) + " ms" : us + " µs";
+const fmtBytes = (b) => b >= 1e6 ? (b / 1e6).toFixed(2) + " MB" : b >= 1e3 ? (b / 1e3).toFixed(1) + " KB" : b + " B";
+
+async function getJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+async function refresh() {
+  const [stats, traces] = await Promise.all([getJSON("/v1/stats"), getJSON("/v1/traces")]);
+  $("s-traces").textContent = stats.traces;
+  $("s-reports").textContent = stats.reports_received;
+  $("s-bytes").textContent = fmtBytes(stats.bytes_received);
+  $("empty").style.display = traces.length ? "none" : "block";
+  const body = $("traces");
+  body.replaceChildren(...traces.map((t) => {
+    const tr = el("tr", { className: t.trace_id === selected ? "sel" : "" },
+      el("td", { className: "mono", textContent: fmtTime(t.start_unix_us) }),
+      el("td", { className: t.has_error ? "err" : "", textContent: t.error_origin || "slow" }),
+      el("td", { textContent: t.span_count }),
+      el("td", { textContent: fmtDur(t.duration_us) }));
+    tr.onclick = () => { selected = t.trace_id; nodeView = null; showTrace(); refresh(); };
+    return tr;
+  }));
+  if (!selected && !nodeView && traces.length) { selected = traces[0].trace_id; showTrace(); }
+  refreshNodes().catch(() => {});
+  if (nodeView) showNode().catch(() => {});
+}
+
+// Healthy traces never reach the collector: show what one node still holds locally.
+let nodeView = null;
+async function showNode() {
+  const spans = await getJSON(`/v1/nodes/${nodeView}/buffer`);
+  const name = nodeView.split(":")[0];
+  const rows = spans.map((s) => el("tr", {},
+    el("td", { className: "mono", textContent: fmtTime(s.start_unix_us) }),
+    el("td", { className: "mono", textContent: s.trace_id.slice(0, 12) + "…" }),
+    el("td", { className: "mono", textContent: s.name }),
+    el("td", { className: s.error ? "err" : "ok", textContent: s.error ? "error" : "ok" }),
+    el("td", { textContent: fmtDur(s.duration_us) })));
+  $("panel-title").textContent = `Buffer of ${name}`;
+  $("detail").replaceChildren(
+    el("div", { className: "meta", textContent:
+      `The ${spans.length} most recent spans held in ${name}'s ring buffer. They stay on the node and are ` +
+      `overwritten when the buffer is full, unless a trigger asks for them. Click a trace on the left to go back.` }),
+    el("table", {},
+      el("thead", {}, el("tr", {}, ...["Time", "Trace", "Operation", "Status", "Duration"].map((h) => el("th", { textContent: h })))),
+      el("tbody", {}, ...rows)));
+}
+
+// One card per node: what its agent has seen, kept and sent.
+async function refreshNodes() {
+  const nodes = await getJSON("/v1/nodes");
+  $("nodes").replaceChildren(...nodes.map((n) => {
+    const name = n.addr.split(":")[0];
+    if (!n.up) {
+      return el("div", { className: "node down" },
+        el("h3", {}, el("span", { className: "err", textContent: name }), el("small", { textContent: "agent unreachable" })));
+    }
+    const b = n.stats.buffer, net = n.stats.net;
+    const item = (k, v) => [el("dt", { textContent: k }), el("dd", { textContent: v })];
+    const card = el("div", { className: "node click" + (nodeView === n.addr ? " sel" : ""),
+      title: "Show what this node holds in its buffer" },
+      el("h3", {}, el("span", { textContent: name }), el("small", { textContent: "mode: " + n.stats.mode })),
+      el("dl", {},
+        ...item("spans seen", b.spans_received),
+        ...item("traces in buffer", `${b.traces_buffered} (${fmtBytes(b.used_bytes)} of ${fmtBytes(b.capacity_bytes)})`),
+        ...item("traces evicted", b.traces_evicted),
+        ...item("traces triggered", b.traces_triggered),
+        ...item("sent to collector", `${net.reports_sent} reports, ${fmtBytes(net.report_bytes_sent)}`),
+        ...item("triggers sent / failed", `${net.triggers_sent} / ${net.trigger_failures}`)));
+    card.onclick = () => { nodeView = n.addr; selected = null; showNode(); refresh(); };
+    return card;
+  }));
+}
+
+async function showTrace() {
+  if (!selected) return;
+  $("panel-title").textContent = "Trace";
+  let t;
+  try { t = await getJSON("/v1/traces/" + selected); } catch { return; }
+  const start = Math.min(...t.spans.map((s) => s.start_unix_us));
+  const end = Math.max(...t.spans.map((s) => s.start_unix_us + s.duration_us));
+  const total = Math.max(end - start, 1);
+  const ids = new Set(t.spans.map((s) => s.span_id));
+  const depth = (s) => { let d = 0, p = s.parent_id;
+    while (p && ids.has(p) && d < 10) { d++; p = t.spans.find((x) => x.span_id === p).parent_id; } return d; };
+
+  const rows = t.spans.map((s) => el("div", { className: "row" },
+    el("div", { className: "label", style: `padding-left:${depth(s) * 16}px` },
+      el("b", { className: s.error ? "err" : "", textContent: s.node }),
+      el("small", { className: "mono", textContent: s.name })),
+    el("div", { className: "track" },
+      el("div", { className: "bar" + (s.error ? " e" : ""),
+        style: `left:${(s.start_unix_us - start) / total * 100}%;width:${s.duration_us / total * 100}%` })),
+    el("div", { className: "dur mono", textContent: fmtDur(s.duration_us) })));
+
+  const peers = t.spans.map((s) => `${s.node} → ${(s.peers || []).join(", ") || "none"}`).join("   ·   ");
+  $("detail").replaceChildren(
+    el("div", { className: "meta" },
+      el("div", {}, "Trace ", el("span", { className: "mono", textContent: t.trace_id })),
+      el("div", { textContent: `Reported by: ${t.nodes.join(", ")}` }),
+      el("div", { textContent: `Why: ${t.reasons.join("; ")}` }),
+      el("div", { textContent: `Status: ${t.has_error ? "error" : "slow"}, ${t.spans.length} span(s)` })),
+    ...rows,
+    el("div", { className: "peers", textContent: "Breadcrumbs: " + peers }));
+}
+
+$("clear").onclick = async () => {
+  await fetch("/v1/traces", { method: "DELETE" });
+  selected = null;
+  $("detail").replaceChildren(el("div", { className: "empty", textContent: "Select a trace." }));
+  refresh();
+};
+setInterval(() => { if ($("auto").checked) refresh().catch(() => {}); }, 1000);
+refresh().catch(() => {});
+</script>
+</body>
+</html>

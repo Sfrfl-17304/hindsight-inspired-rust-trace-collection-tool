@@ -4,6 +4,7 @@
 //! * `POST /v1/spans`   – the local service hands over finished spans
 //! * `POST /v1/trigger` – a neighbouring agent asks for its part of a trace
 //! * `GET  /v1/stats`   – buffer and network counters (for the experiments)
+//! * `GET  /v1/buffer`  – peek at the most recent buffered traces (read-only)
 //!
 //! Modes (so the baselines run on the same code path):
 //! * `retro`        – keep locally, collect cooperatively on trigger (Rewind)
@@ -320,11 +321,18 @@ async fn stats(State(agent): State<SharedAgent>) -> Json<serde_json::Value> {
     Json(serde_json::to_value(resp).expect("serialize stats"))
 }
 
+/// The 50 most recent traces still held in the buffer (healthy traces that
+/// were never sent). For inspection and demos; it does not collect them.
+async fn buffer(State(agent): State<SharedAgent>) -> Json<Vec<Span>> {
+    Json(agent.buffer.lock().unwrap().recent(50))
+}
+
 pub fn router(agent: SharedAgent) -> Router {
     Router::new()
         .route("/v1/spans", post(ingest))
         .route("/v1/trigger", post(trigger))
         .route("/v1/stats", get(stats))
+        .route("/v1/buffer", get(buffer))
         .route("/healthz", get(|| async { "ok" }))
         .with_state(agent)
 }

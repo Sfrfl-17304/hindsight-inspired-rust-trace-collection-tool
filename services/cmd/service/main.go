@@ -28,6 +28,9 @@ const (
 	hTrace  = "X-Rewind-Trace"  // trace id
 	hParent = "X-Rewind-Parent" // caller's span id
 	hAgent  = "X-Rewind-Agent"  // agent address of the sender (request) or responder (response)
+	// Number of services that handled the request, this one included. Only
+	// used by the load generator to know how many spans a trace should have.
+	hHops = "X-Rewind-Hops"
 )
 
 type Span struct {
@@ -95,8 +98,10 @@ func (s *server) handle(w http.ResponseWriter, r *http.Request) {
 	time.Sleep(s.work) // simulated work
 
 	failed := false
+	hops := 1
 	for _, d := range s.downstream {
-		peer, err := s.call(d, traceID, sp.SpanID)
+		peer, n, err := s.call(d, traceID, sp.SpanID)
+		hops += n
 		if peer != "" {
 			sp.Peers = append(sp.Peers, peer)
 		}
@@ -114,6 +119,7 @@ func (s *server) handle(w http.ResponseWriter, r *http.Request) {
 	sp.DurationUs = time.Since(start).Microseconds()
 	s.exp.add(sp)
 
+	w.Header().Set(hHops, strconv.Itoa(hops))
 	if failed {
 		http.Error(w, s.node+" failed", http.StatusInternalServerError)
 		return
@@ -121,26 +127,29 @@ func (s *server) handle(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "ok from %s\n", s.node)
 }
 
-// call forwards the request downstream and returns the callee's agent address.
-func (s *server) call(url, traceID, parentSpan string) (string, error) {
+// call forwards the request downstream. It returns the callee's agent address
+// and the number of services that handled the request downstream (0 if the
+// callee could not be reached or did not answer in time).
+func (s *server) call(url, traceID, parentSpan string) (string, int, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	req.Header.Set(hTrace, traceID)
 	req.Header.Set(hParent, parentSpan)
 	req.Header.Set(hAgent, s.agentAddr)
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
 	peer := resp.Header.Get(hAgent)
+	hops, _ := strconv.Atoi(resp.Header.Get(hHops))
 	if resp.StatusCode >= 500 {
-		return peer, fmt.Errorf("%s returned %d", url, resp.StatusCode)
+		return peer, hops, fmt.Errorf("%s returned %d", url, resp.StatusCode)
 	}
-	return peer, nil
+	return peer, hops, nil
 }
 
 // exporter batches spans and posts them to the local agent. It never blocks

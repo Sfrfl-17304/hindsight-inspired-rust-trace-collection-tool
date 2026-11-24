@@ -23,6 +23,7 @@ type result struct {
 	start     time.Time
 	status    int
 	latencyMs float64
+	hops      int // services that handled the request = spans the trace should have
 }
 
 func main() {
@@ -62,6 +63,7 @@ loop:
 					io.Copy(io.Discard, resp.Body)
 					resp.Body.Close()
 					r.status = resp.StatusCode
+					r.hops, _ = strconv.Atoi(resp.Header.Get("X-Rewind-Hops"))
 				}
 				r.latencyMs = float64(time.Since(r.start).Microseconds()) / 1000
 				mu.Lock()
@@ -78,14 +80,15 @@ loop:
 	}
 	defer f.Close()
 	w := csv.NewWriter(f)
-	w.Write([]string{"trace_id", "start_unix_us", "status", "latency_ms"})
+	w.Write([]string{"trace_id", "start_unix_us", "status", "latency_ms", "hops"})
 	failed := 0
 	for _, r := range results {
 		if r.status != 200 {
 			failed++
 		}
 		w.Write([]string{r.traceID, strconv.FormatInt(r.start.UnixMicro(), 10),
-			strconv.Itoa(r.status), strconv.FormatFloat(r.latencyMs, 'f', 2, 64)})
+			strconv.Itoa(r.status), strconv.FormatFloat(r.latencyMs, 'f', 2, 64),
+			strconv.Itoa(r.hops)})
 	}
 	w.Flush()
 	fmt.Printf("sent %d requests, %d failed, ground truth written to %s\n", len(results), failed, *out)

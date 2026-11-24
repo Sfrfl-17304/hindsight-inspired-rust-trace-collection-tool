@@ -34,7 +34,9 @@ services:
     build: ./tracer
     image: rewind-tracer
     entrypoint: ["rewind-collector"]
-    ports: ["9100:9100"]
+    environment:
+      REWIND_AGENTS: frontend:9000,orders:9000,payments:9000 # shown in the viewer
+    ports: ["9100:9100"] # viewer: http://localhost:9100
 
   # ---------------- node: frontend ----------------
   frontend:

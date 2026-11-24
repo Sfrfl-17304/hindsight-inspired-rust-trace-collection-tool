@@ -124,6 +124,18 @@ impl TraceBuffer {
         })
     }
 
+    /// Spans of the `limit` most recently buffered traces, newest first.
+    /// Read-only: used to inspect the buffer, it does not trigger anything.
+    pub fn recent(&self, limit: usize) -> Vec<Span> {
+        self.order
+            .iter()
+            .rev()
+            .filter_map(|(id, seq)| self.traces.get(id).filter(|e| e.seq == *seq))
+            .take(limit)
+            .flat_map(|e| e.spans.iter().cloned())
+            .collect()
+    }
+
     pub fn is_triggered(&self, trace_id: &str) -> bool {
         self.triggered.contains(trace_id)
     }
@@ -212,6 +224,23 @@ mod tests {
             Insert::AlreadyTriggered(s) => assert_eq!(s.span_id, "late"),
             other => panic!("expected AlreadyTriggered, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn recent_lists_newest_buffered_traces_without_taking_them() {
+        let mut b = TraceBuffer::new(10_000);
+        b.insert(span("t1", "a"));
+        b.insert(span("t2", "a"));
+        b.insert(span("t3", "a"));
+        b.take_for_trigger("t2");
+        let ids: Vec<_> = b.recent(10).into_iter().map(|s| s.trace_id).collect();
+        assert_eq!(ids, ["t3", "t1"]);
+        assert_eq!(b.recent(1).len(), 1);
+        assert_eq!(
+            b.stats().traces_buffered,
+            2,
+            "peeking does not remove anything"
+        );
     }
 
     #[test]

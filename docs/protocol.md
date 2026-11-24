@@ -23,6 +23,10 @@ its direct neighbours — and nothing more. No node knows the whole call graph;
 a trace is collected by following these breadcrumbs one hop at a time
 (Hindsight's idea).
 
+Responses also carry `X-Rewind-Hops`: the number of services that handled
+the request. It is not part of the protocol; the load generator records it
+so the experiments know how many spans a complete trace has.
+
 ## Trigger
 
 A node triggers a trace when it sees `error = true` or a span slower than
